@@ -70,6 +70,19 @@ def test_parse_readelf_d_no_rpath():
     ''')
     assert parse_readelf_d(section) == []
 
+def test_parse_readelf_d_rpath():
+    section = dedent('''
+    Dynamic section at offset 0x58000 contains 27 entries:
+      Tag        Type                         Name/Value
+     0x000000000000000f (RPATH)              Library rpath: [$ORIGIN/../..]
+     0x0000000000000001 (NEEDED)             Shared library: [libsqlite3.so.0]
+     0x0000000000000001 (NEEDED)             Shared library: [libpthread.so.0]
+     0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
+     0x000000000000000c (INIT)               0x51f8
+     ''')
+    assert parse_readelf_d(section) == ['$ORIGIN/../..']
+
+
 def test_is_in_dir(tmp_path):
     parent = tmp_path / "foo"
     child = tmp_path / "foo" / "bar" / "bang"
