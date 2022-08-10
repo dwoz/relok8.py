@@ -95,6 +95,15 @@ def parse_otool_l(stdout):
 
     return data
 
+def parse_readelf_d(stdout):
+    #XXX Parse library id too
+    for line in stdout.splitlines():
+        # Find either RPATH or READPATH
+        if line.find("PATH") == -1:
+            continue
+        return line.split(":", 1)[-1].strip().strip('[').strip(']').split(':')
+    return []
+
 def parse_macho(path):
     proc = subprocess.run(['otool', '-l', path], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
     stdout = proc.stdout.decode()
@@ -104,13 +113,9 @@ def parse_macho(path):
 
 
 def parse_rpath(path):
-    proc = subprocess.run(["readelf", "-a", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    for line in proc.stdout.decode().splitlines():
-        # Find either RPATH or READPATH
-        if line.find("PATH") == -1:
-            continue
-        return line.split(":", 1)[-1].strip().strip('[').strip(']').split(':')
-    return []
+    proc = subprocess.run(["readelf", "-d", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return parse_readelf_a(proc.stdout.decode())
+
 
 def handle_macho(path, root_dir):
     obj = parse_macho(path)
