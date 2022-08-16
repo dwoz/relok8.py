@@ -95,7 +95,6 @@ def parse_otool_l(stdout):
 
 
 def parse_readelf_d(stdout):
-    # XXX Parse library id too
     for line in stdout.splitlines():
         # Find either RPATH or READPATH
         if line.find("PATH") == -1:
@@ -118,7 +117,7 @@ def parse_rpath(path):
     proc = subprocess.run(
         ["readelf", "-d", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
-    return parse_readelf_a(proc.stdout.decode())
+    return parse_readelf_d(proc.stdout.decode())
 
 
 def handle_macho(path, root_dir):
@@ -134,7 +133,7 @@ def handle_macho(path, root_dir):
                 if not os.path.exists(y):
                     shutil.copy(x, y)
                     shutil.copymode(x, y)
-                    log.info("Coppied %s to %s", x, y)
+                    log.info("Copied %s to %s", x, y)
                 log.info("Use %s to %s", y, path)
                 z = pathlib.Path("@loader_path") / os.path.relpath(
                     y, pathlib.Path(path).resolve().parent
@@ -149,6 +148,22 @@ def is_in_dir(filepath, directory):
     return os.path.realpath(filepath).startswith(os.path.realpath(directory) + os.sep)
 
 
+def patch_rpath(path, new_rpath):
+    old_rpath = parse_rpath(path)
+
+    if new_rpath not in old_rpath:
+        patched_rpath = ":".join([new_rpath] + old_rpath)
+        log.info("Set RPATH=%s %s", patched_rpath, path)
+        proc = subprocess.run(
+            ["patchelf", "--force-rpath", "--set-rpath", patched_rpath, path],
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+        )
+
+        return proc.returncode == 0
+    return True
+
+
 def handle_elf(path, libs, root=None):
     if root is None:
         root = libs
@@ -160,7 +175,7 @@ def handle_elf(path, libs, root=None):
 
         lib_name, location_info = [_.strip() for _ in line.split("=>", 1)]
         if location_info == "not found":
-            # XXX This could be considered an error
+            # It is likely that something was not compiled correctly
             log.warning("Unable to find library %s linked from %s", lib_name, path)
             continue
 
@@ -172,16 +187,14 @@ def handle_elf(path, libs, root=None):
             continue
 
         if is_in_dir(linked_lib, root):
-            # XXX Validate the rpath of the elf points to this file's location
-            # and if not add it.
-            log.warning("Skip file already within root directory: %s", linked_lib)
+            needs_rpath = True
+            log.warning("File already within root directory: %s", linked_lib)
             continue
 
         relocated_path = os.path.join(libs, lib_basename)
 
         if os.path.exists(relocated_path):
             log.debug("Relocated library exists: %s", relocated_path)
-            # XXX Check hashes?
         else:
             log.info("Copy %s to %s", linked_lib, relocated_path)
             shutil.copy(linked_lib, relocated_path)
@@ -195,16 +208,7 @@ def handle_elf(path, libs, root=None):
         else:
             relpath = str(pathlib.Path("$ORIGIN") / relpart)
 
-        old_rpath = parse_rpath(path)
-
-        if relpath not in old_rpath:
-            new_rpath = ":".join([relpath] + old_rpath)
-            log.info("Set RPATH=%s %s", new_rpath, path)
-            proc = subprocess.run(
-                ["patchelf", "--force-rpath", "--set-rpath", new_rpath, path],
-                stderr=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-            )
+        patch_rpath(path, relpath)
 
 
 def main():

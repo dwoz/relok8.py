@@ -1,8 +1,9 @@
 from textwrap import dedent
 
 import pytest
+from unittest.mock import MagicMock, patch
 
-from relok8 import is_elf, is_in_dir, is_macho, parse_otool_l, parse_readelf_d
+from relok8 import is_elf, is_in_dir, is_macho, parse_otool_l, parse_readelf_d, patch_rpath, parse_rpath
 
 
 def test_is_macko_true(tmp_path):
@@ -94,3 +95,27 @@ def test_is_in_dir(tmp_path):
     parent = tmp_path / "foo"
     child = tmp_path / "foo" / "bar" / "bang"
     assert is_in_dir(child, parent) == True
+
+
+def test_patch_rpath(tmp_path):
+    path = str(tmp_path / "test")
+    new_rpath = str(tmp_path / "lib")
+    with patch("subprocess.run", return_value=MagicMock(returncode=0)):
+        with patch("relok8.parse_rpath", return_value=[str(tmp_path / "old" / "lib")]):
+            assert patch_rpath(path, new_rpath) is True
+
+
+def test_patch_rpath_failed(tmp_path):
+    path = str(tmp_path / "test")
+    new_rpath = str(tmp_path / "lib")
+    with patch("subprocess.run", return_value=MagicMock(returncode=1)):
+        with patch("relok8.parse_rpath", return_value=[str(tmp_path / "old" / "lib")]):
+            assert patch_rpath(path, new_rpath) is False
+
+
+def test_patch_rpath_no_change(tmp_path):
+    path = str(tmp_path / "test")
+    new_rpath = str(tmp_path / "lib")
+    with patch("subprocess.run", return_value=MagicMock(returncode=1)):
+        with patch("relok8.parse_rpath", return_value=[new_rpath]):
+            assert patch_rpath(path, new_rpath) is True
