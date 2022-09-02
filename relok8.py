@@ -43,6 +43,7 @@ parser = argparse.ArgumentParser(description="Relocate linked libraries")
 parser.add_argument("--root", default="build/salt")
 parser.add_argument("--libs", default="build/salt/lib")
 parser.add_argument("--log-level", default="INFO")
+parser.add_argument("--rpath-only", action="store_true")
 
 
 def is_macho(path):
@@ -120,7 +121,7 @@ def parse_rpath(path):
     return parse_readelf_d(proc.stdout.decode())
 
 
-def handle_macho(path, root_dir):
+def handle_macho(path, root_dir, rpath_only):
     obj = parse_macho(path)
     log.info("Processing file %s %r", path, obj)
     if LC_LOAD_DYLIB in obj:
@@ -131,9 +132,13 @@ def handle_macho(path, root_dir):
             if os.path.exists(x):
                 y = pathlib.Path(root_dir).resolve() / os.path.basename(x)
                 if not os.path.exists(y):
-                    shutil.copy(x, y)
-                    shutil.copymode(x, y)
-                    log.info("Copied %s to %s", x, y)
+                    if rpath_only:
+                        log.warning("In `rpath_only mode` but %s is not in %s", x, y)
+                        continue
+                    else:
+                        shutil.copy(x, y)
+                        shutil.copymode(x, y)
+                        log.info("Copied %s to %s", x, y)
                 log.info("Use %s to %s", y, path)
                 z = pathlib.Path("@loader_path") / os.path.relpath(
                     y, pathlib.Path(path).resolve().parent
@@ -164,7 +169,7 @@ def patch_rpath(path, new_rpath):
     return True
 
 
-def handle_elf(path, libs, root=None):
+def handle_elf(path, libs, rpath_only, root=None):
     if root is None:
         root = libs
     proc = subprocess.run(["ldd", path], stderr=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -190,12 +195,15 @@ def handle_elf(path, libs, root=None):
             needs_rpath = True
             log.warning("File already within root directory: %s", linked_lib)
             continue
-
+        
         relocated_path = os.path.join(libs, lib_basename)
 
         if os.path.exists(relocated_path):
             log.debug("Relocated library exists: %s", relocated_path)
+        elif rpath_only:
+            log.warning("In `rpath_only mode` but %s is not in %s", linked_lib, root)
         else:
+            # If we aren't in `rpath_only` mode, we can copy
             log.info("Copy %s to %s", linked_lib, relocated_path)
             shutil.copy(linked_lib, relocated_path)
             shutil.copymode(linked_lib, relocated_path)
@@ -219,6 +227,7 @@ def main():
     )
     root_dir = str(pathlib.Path(args.root).resolve())
     libs_dir = str(pathlib.Path(args.libs).resolve())
+    rpath_only = args.rpath_only
     processed = {}
     found = True
     while found:
@@ -231,13 +240,13 @@ def main():
                 log.debug("Checking %s", path)
                 if is_macho(path):
                     log.info("Found Mach-O %s", path)
-                    _ = handle_macho(path, libs_dir)
+                    _ = handle_macho(path, libs_dir, rpath_only)
                     if _ is not None:
                         processed[path] = _
                         found = True
                 elif is_elf(path):
                     log.info("Found ELF %s", path)
-                    handle_elf(path, libs_dir, root_dir)
+                    handle_elf(path, libs_dir, rpath_only, root_dir)
 
 
 if __name__ == "__main__":
