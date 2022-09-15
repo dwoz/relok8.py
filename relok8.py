@@ -153,8 +153,12 @@ def is_in_dir(filepath, directory):
     return os.path.realpath(filepath).startswith(os.path.realpath(directory) + os.sep)
 
 
-def patch_rpath(path, new_rpath):
+def patch_rpath(path, new_rpath, only_relative=True):
     old_rpath = parse_rpath(path)
+
+    # Remove non-relative rpaths if needed
+    if only_relative:
+        old_rpath = [rpath for rpath in old_rpath if rpath.startswith("$ORIGIN")]
 
     if new_rpath not in old_rpath:
         patched_rpath = ":".join([new_rpath] + old_rpath)
@@ -165,8 +169,10 @@ def patch_rpath(path, new_rpath):
             stdout=subprocess.PIPE,
         )
 
-        return proc.returncode == 0
-    return True
+        if proc.returncode:
+            return False
+        return patched_rpath
+    return ":".join(old_rpath)
 
 
 def handle_elf(path, libs, rpath_only, root=None):
